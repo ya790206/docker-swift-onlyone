@@ -9,6 +9,9 @@ SWIFT_PART_POWER=${SWIFT_PART_POWER:-7}
 SWIFT_PART_HOURS=${SWIFT_PART_HOURS:-1}
 SWIFT_REPLICAS=${SWIFT_REPLICAS:-1}
 
+# clear /srv/ folder
+rm -rf /srv/*
+
 if [ -e /srv/account.builder ]; then
 	echo "Ring files already exist in /srv, copying them to /etc/swift..."
 	cp /srv/*.builder /etc/swift/
@@ -19,31 +22,58 @@ fi
 # to get it owned by Swift.
 chown -R swift:swift /srv
 
-if [ ! -e /etc/swift/account.builder ]; then
+# build ring
 
-	cd /etc/swift
+cd /etc/swift
 
-	# 2^& = 128 we are assuming just one drive
-	# 1 replica only
+# 2^& = 128 we are assuming just one drive
+# 1 replica only
 
-	echo "No existing ring files, creating them..."
+echo "No existing ring files, creating them..."
 
-	swift-ring-builder object.builder create ${SWIFT_PART_POWER} ${SWIFT_REPLICAS} ${SWIFT_PART_HOURS}
-	swift-ring-builder object.builder add r1z1-127.0.0.1:6010/sdb1 1
-	swift-ring-builder object.builder rebalance
-	swift-ring-builder container.builder create ${SWIFT_PART_POWER} ${SWIFT_REPLICAS} ${SWIFT_PART_HOURS}
-	swift-ring-builder container.builder add r1z1-127.0.0.1:6011/sdb1 1
-	swift-ring-builder container.builder rebalance
-	swift-ring-builder account.builder create ${SWIFT_PART_POWER} ${SWIFT_REPLICAS} ${SWIFT_PART_HOURS}
-	swift-ring-builder account.builder add r1z1-127.0.0.1:6012/sdb1 1
-	swift-ring-builder account.builder rebalance
+swift-ring-builder object.builder create ${SWIFT_PART_POWER} ${SWIFT_REPLICAS} ${SWIFT_PART_HOURS}
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/a 1
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/b 1
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/c 1
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/e 1
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/f 1
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/g 1
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/h 1
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/i 1
 
-	# Back these up for later use
-	echo "Copying ring files to /srv to save them if it's a docker volume..."
-	cp *.gz /srv
-	cp *.builder /srv
 
-fi
+#swift-ring-builder object.builder add r1z1-127.0.0.1:6110/sdb1 1
+#swift-ring-builder object.builder add r1z1-127.0.0.1:6110/sdc1 1
+
+swift-ring-builder object.builder rebalance
+swift-ring-builder container.builder create ${SWIFT_PART_POWER} ${SWIFT_REPLICAS} ${SWIFT_PART_HOURS}
+swift-ring-builder container.builder add r1z1-127.0.0.1:6011/sdb1 1
+swift-ring-builder container.builder add r1z1-127.0.0.1:6011/sdc1 1
+swift-ring-builder container.builder add r1z1-127.0.0.1:6011/sdd1 1
+swift-ring-builder container.builder add r1z1-127.0.0.1:6011/hello 1
+
+#swift-ring-builder container.builder add r1z1-127.0.0.1:6111/sdb1 1
+#swift-ring-builder container.builder add r1z1-127.0.0.1:6111/sdc1 1
+
+swift-ring-builder container.builder rebalance
+swift-ring-builder account.builder create ${SWIFT_PART_POWER} ${SWIFT_REPLICAS} ${SWIFT_PART_HOURS}
+swift-ring-builder account.builder add r1z1-127.0.0.1:6012/sdb1 1
+swift-ring-builder account.builder add r1z1-127.0.0.1:6012/sdc1 1
+swift-ring-builder account.builder add r1z1-127.0.0.1:6012/sdd1 1
+swift-ring-builder account.builder add r1z1-127.0.0.1:6012/hello 1
+
+#swift-ring-builder account.builder add r1z1-127.0.0.1:6112/sdb1 1
+#swift-ring-builder account.builder add r1z1-127.0.0.1:6112/sdc1 1
+
+swift-ring-builder account.builder rebalance
+
+# Back these up for later use
+echo "Copying ring files to /srv to save them if it's a docker volume..."
+mkdir /srv/ring
+cp *.builder /srv/ring
+cp *.gz /srv/ring
+
+
 
 # If you are going to put an ssl terminator in front of the proxy, then I believe
 # the storage_url_scheme should be set to https. So if this var isn't empty, set
@@ -75,6 +105,32 @@ echo "Starting supervisord..."
 # sleep waiting for rsyslog to come up under supervisord
 sleep 3
 
-echo "Starting to tail /var/log/syslog...(hit ctrl-c if you are starting the container in a bash shell)"
+service ssh restart
+service rsync restart
 
-tail -n 0 -f /var/log/syslog
+
+# make version controll
+
+cd ~/swift
+cp /data/gitignore ~/swift/.gitignore
+git config --global user.email "email@email.com"
+git config --global user.name "swift_docker"
+git init
+git add .
+git commit -m "init"
+
+
+# bashrc
+git clone https://github.com/ya790206/auto_config /auto_config
+python /auto_config/init_bashrc.py
+sed -i 's/exec tmux/ echo "S" /' ~/.bashrc
+
+# disable capture_stdio for pdb.
+echo 'def capture_stdio(logger, **kwargs): pass' >>   common/utils.py
+
+
+# upload a image
+swift -A http://127.0.0.1:8080/auth/v1.0 -U test:tester -K testing upload a ~/image
+
+
+/bin/bash
